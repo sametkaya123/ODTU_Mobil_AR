@@ -1,0 +1,42 @@
+node_modules/
+.expo/
+.expo/types/
+dist/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# Expo prebuild native projects (managed workflow → build on EAS, not commit)
+android/
+ios/
+
+# Local build outputs (gradle / xcode / EAS local)
+*.apk
+*.aab
+.gradle/
+build/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# @generated expo-cli types
+expo-env.d.ts
+
+# TypeScript incremental
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+
+# Metro
+.metro-health-check*
+metro-*
