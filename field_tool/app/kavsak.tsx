@@ -12,22 +12,21 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { storage } from '@/lib/storage';
 import { settings, suggestIntersectionId } from '@/lib/settings';
+import { AppHeader } from '@/components/AppHeader';
+import { Card } from '@/components/Surface';
+import { ProgressBar } from '@/components/ProgressBar';
+import { IconSymbol } from '@/components/StatTile';
 import { useThemedAlert } from '@/components/Alert';
-import type { Asset, Intersection, ReferenceImage } from '@/types/domain';
+import type { Asset, AssetType, Intersection, ReferenceImage } from '@/types/domain';
 import { useTheme } from '@/lib/theme';
 
-interface Row {
-  intersection: Intersection;
-  assetCount: number;
-  shotCount: number;
-}
-
 type SortMode = 'date-desc' | 'date-asc' | 'az' | 'za';
+
 const SORT_LABEL: Record<SortMode, string> = {
   'date-desc': 'Tarih ↓',
   'date-asc': 'Tarih ↑',
@@ -36,18 +35,45 @@ const SORT_LABEL: Record<SortMode, string> = {
 };
 const SORT_ORDER: SortMode[] = ['date-desc', 'date-asc', 'az', 'za'];
 
+const TYPE_LABEL: Record<AssetType, string> = {
+  traffic_signal: 'Sinyal',
+  cabinet: 'Pano',
+  bus_stop: 'Durak',
+};
+const TYPE_DOT: Record<AssetType, 'signal' | 'cabinet' | 'busStop'> = {
+  traffic_signal: 'signal',
+  cabinet: 'cabinet',
+  bus_stop: 'busStop',
+};
+
+// Ideal shots per asset — drives the completion percentage.
+// ponytail: hard-coded 16 — covers the 4 angles × 2 lights × 2 postures start
+// set without forcing a separate settings round-trip.
+const SHOTS_PER_ASSET_TARGET = 16;
+
+interface RowState {
+  intersection: Intersection;
+  assetCount: number;
+  typeCounts: Record<AssetType, number>;
+  shotCount: number;
+  perAssetShots: number[];
+  completed: boolean; // every asset has ≥1 shot
+}
+
 export default function KavsakScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const t = useTheme();
   const styles = makeStyles(t);
-  const { confirm, alert } = useThemedAlert();
-  const [rows, setRows] = useState<Row[]>([]);
+  const { confirm } = useThemedAlert();
+  const [rows, setRows] = useState<RowState[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('date-desc');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<{ id: string; intersection_name: string }>({
     id: '',
     intersection_name: '',
@@ -59,27 +85,42 @@ export default function KavsakScreen() {
       storage.getAssets(),
       storage.getShots(),
     ]);
-    const assetByIx = new Map<string, Asset[]>();
-    for (const a of assets) {
-      const list = assetByIx.get(a.intersection_id) ?? [];
-      list.push(a);
-      assetByIx.set(a.intersection_id, list);
-    }
     const shotCountByAsset = new Map<string, number>();
     for (const s of shots as ReferenceImage[]) {
       shotCountByAsset.set(s.asset_id, (shotCountByAsset.get(s.asset_id) ?? 0) + 1);
     }
-    const shotByIx = new Map<string, number>();
+    const assetsByIx = new Map<string, Asset[]>();
     for (const a of assets) {
-      const c = shotCountByAsset.get(a.asset_id) ?? 0;
-      shotByIx.set(a.intersection_id, (shotByIx.get(a.intersection_id) ?? 0) + c);
+      const list = assetsByIx.get(a.intersection_id) ?? [];
+      list.push(a);
+      assetsByIx.set(a.intersection_id, list);
     }
     setRows(
-      intersections.map((i) => ({
-        intersection: i,
-        assetCount: assetByIx.get(i.intersection_id)?.length ?? 0,
-        shotCount: shotByIx.get(i.intersection_id) ?? 0,
-      })),
+      intersections.map((i) => {
+        const a = assetsByIx.get(i.intersection_id) ?? [];
+        const typeCounts: Record<AssetType, number> = {
+          traffic_signal: 0,
+          cabinet: 0,
+          bus_stop: 0,
+        };
+        const perAssetShots: number[] = [];
+        let shotCount = 0;
+        for (const x of a) {
+          typeCounts[x.type] += 1;
+          const c = shotCountByAsset.get(x.asset_id) ?? 0;
+          perAssetShots.push(c);
+          shotCount += c;
+        }
+        const completed = a.length > 0 && perAssetShots.every((c) => c >= 1);
+        return {
+          intersection: i,
+          assetCount: a.length,
+          typeCounts,
+          shotCount,
+          perAssetShots,
+          completed,
+        };
+      }),
     );
   }, []);
 
@@ -89,29 +130,49 @@ export default function KavsakScreen() {
     }, [load]),
   );
 
-  // Sort applied here so user can flip modes without a fresh fetch.
-  const sortedRows = useMemo(() => {
-    const out = [...rows];
+  // Summary counts — used by per-row progress.
+  const counts = useMemo(() => {
+    let all = 0;
+    let completed = 0;
+    for (const r of rows) {
+      all += 1;
+      if (r.completed) completed += 1;
+    }
+    return { all, completed };
+  }, [rows]);
+  void counts;
+
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase('tr');
+    let out = rows;
+    if (q) {
+      out = out.filter((r) => {
+        const id = r.intersection.intersection_id.toLocaleLowerCase('tr');
+        const name = (r.intersection.intersection_name ?? '').toLocaleLowerCase('tr');
+        return id.includes(q) || name.includes(q);
+      });
+    }
+    const arr = [...out];
     switch (sortMode) {
       case 'date-desc':
-        out.sort((a, b) => b.intersection.created_at.localeCompare(a.intersection.created_at));
+        arr.sort((a, b) => b.intersection.created_at.localeCompare(a.intersection.created_at));
         break;
       case 'date-asc':
-        out.sort((a, b) => a.intersection.created_at.localeCompare(b.intersection.created_at));
+        arr.sort((a, b) => a.intersection.created_at.localeCompare(b.intersection.created_at));
         break;
       case 'az':
-        out.sort((a, b) =>
+        arr.sort((a, b) =>
           a.intersection.intersection_id.localeCompare(b.intersection.intersection_id),
         );
         break;
       case 'za':
-        out.sort((a, b) =>
+        arr.sort((a, b) =>
           b.intersection.intersection_id.localeCompare(a.intersection.intersection_id),
         );
         break;
     }
-    return out;
-  }, [rows, sortMode]);
+    return arr;
+  }, [rows, query, sortMode]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -124,14 +185,18 @@ export default function KavsakScreen() {
 
   const openNew = useCallback(async () => {
     const s = await settings.get();
-    const id = suggestIntersectionId(s.nextIntersectionCounter, s.intersectionIdPrefix, s.projectId);
+    const id = suggestIntersectionId(
+      s.nextIntersectionCounter,
+      s.intersectionIdPrefix,
+      s.projectId,
+    );
     setForm({ id, intersection_name: '' });
     setEditingId(null);
     setAdding(true);
     Haptics.selectionAsync().catch(() => {});
   }, []);
 
-  const openEdit = useCallback((r: Row) => {
+  const openEdit = useCallback((r: RowState) => {
     setForm({
       id: r.intersection.intersection_id,
       intersection_name: r.intersection.intersection_name ?? '',
@@ -180,7 +245,7 @@ export default function KavsakScreen() {
   }, [form, editingId, cancelForm, load]);
 
   const deleteKavsak = useCallback(
-    (r: Row) => {
+    (r: RowState) => {
       confirm({
         title: 'Kavşak Sil',
         message: `"${r.intersection.intersection_id}" ve ${r.assetCount} asset + ${r.shotCount} foto silinsin mi?`,
@@ -224,22 +289,36 @@ export default function KavsakScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
         <FlatList
-          data={sortedRows}
+          data={visibleRows}
           keyExtractor={(r) => r.intersection.intersection_id}
-          contentContainerStyle={
-            rows.length === 0 ? styles.emptyWrap : { paddingBottom: 12 }
-          }
+          contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />
           }
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
-            <>
-              <View style={styles.heroRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.heroTitle}>Kavşaklar</Text>
-                  <Text style={styles.heroSub}>{rows.length} kavşak</Text>
-                </View>
+            <View style={styles.headerWrap}>
+              {/* Search */}
+              <View style={styles.searchBox}>
+                <IconSymbol
+                  name="search"
+                  size={22}
+                  color={t.textMuted}
+                  style={styles.searchIcon}
+                />
+                <TextInput
+                  style={styles.searchInput}
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Kavşak ID veya adı ile ara…"
+                  placeholderTextColor={t.textMuted}
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+              </View>
+
+              {/* Sort toolbar */}
+              <View style={styles.toolbarRow}>
                 <Pressable
                   style={({ pressed }) => [styles.sortBtn, pressed && styles.pressed]}
                   onPress={() => {
@@ -251,81 +330,108 @@ export default function KavsakScreen() {
                   <Text style={styles.sortBtnLabel}>{SORT_LABEL[sortMode]}</Text>
                   <Text style={styles.sortBtnChevron}>▾</Text>
                 </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-                  onPress={() => router.push('/ayarlar')}
-                  hitSlop={6}
-                >
-                  <Text style={styles.iconBtnText}>⚙︎</Text>
-                </Pressable>
               </View>
-              <Pressable
-                style={({ pressed }) => [styles.mapCard, pressed && styles.pressed]}
-                onPress={() => router.push('/harita')}
-              >
-                <Text style={styles.mapEmoji}>🗺️</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.mapTitle}>Tüm Konumları Haritada Gör</Text>
-                  <Text style={styles.mapSub}>Asset pinleri — tıkla → detay</Text>
-                </View>
-                <Text style={styles.mapChevron}>›</Text>
-              </Pressable>
-            </>
-          }
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>🛣️</Text>
-              <Text style={styles.emptyTitle}>Henüz kavşak yok</Text>
-              <Text style={styles.emptyBody}>
-                Aşağıdan "+ Yeni Kavşak Ekle" ile başla.
-              </Text>
             </View>
           }
+          ListEmptyComponent={
+            visibleRows.length === 0 && rows.length > 0 ? (
+              <View style={styles.emptyInline}>
+                <IconSymbol name="search_off" size={28} color={t.primary} />
+                <Text style={styles.emptyTitle}>Eşleşen kavşak yok</Text>
+                <Text style={styles.emptyBody}>Aramayı değiştir.</Text>
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => (
-            <View style={styles.row}>
+            <Card padded style={styles.row}>
               <Pressable
-                style={styles.rowMain}
+                style={styles.cardMain}
                 onPress={() =>
                   router.push({
                     pathname: '/asset',
-                    params: { intersection_id: item.intersection.intersection_id },
+                    params: {
+                      intersection_id: item.intersection.intersection_id,
+                    },
                   })
                 }
               >
-                <Text style={styles.rowTitle}>{item.intersection.intersection_id}</Text>
-                {item.intersection.intersection_name && (
-                  <Text style={styles.rowSubtitle}>{item.intersection.intersection_name}</Text>
-                )}
-                <Text style={styles.rowMeta}>
-                  {item.assetCount} asset · {item.shotCount} foto
-                </Text>
+                <View style={styles.cardTopRow}>
+                  <Text style={styles.idMono}>
+                    {item.intersection.intersection_id}
+                  </Text>
+                  <View style={styles.assetPill}>
+                    <Text style={styles.assetPillText}>
+                      {item.assetCount} Asset
+                    </Text>
+                  </View>
+                </View>
+                {item.intersection.intersection_name ? (
+                  <Text style={styles.title}>
+                    {item.intersection.intersection_name}
+                  </Text>
+                ) : null}
+                <View style={styles.typesRow}>
+                  {(['traffic_signal', 'cabinet', 'bus_stop'] as AssetType[]).map(
+                    (ty) => (
+                      <View key={ty} style={styles.typeItem}>
+                        <View
+                          style={[
+                            styles.typeDot,
+                            { backgroundColor: t[TYPE_DOT[ty]] },
+                          ]}
+                        />
+                        <Text style={styles.typeLabel}>
+                          {item.typeCounts[ty]} {TYPE_LABEL[ty]}
+                        </Text>
+                      </View>
+                    ),
+                  )}
+                </View>
+                <ProgressRow row={item} />
               </Pressable>
-              <View style={styles.rowActions}>
+              <View style={styles.actionRow}>
                 <Pressable
-                  style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
                   onPress={() => openEdit(item)}
-                  hitSlop={6}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
                 >
-                  <Text style={styles.iconBtnText}>✎</Text>
+                  <IconSymbol name="edit" size={18} color={t.text} />
                 </Pressable>
                 <Pressable
-                  style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
                   onPress={() => deleteKavsak(item)}
-                  hitSlop={6}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
                 >
-                  <Text style={[styles.iconBtnText, { color: t.danger }]}>×</Text>
+                  <IconSymbol name="delete" size={18} color={t.danger} />
                 </Pressable>
               </View>
-            </View>
+            </Card>
           )}
-          ListFooterComponent={
-            adding ? (
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>
-                  {editingId ? 'Kavşak Düzenle' : 'Yeni Kavşak'}
-                </Text>
+        />
+
+        {/* Bottom — sticky CTA + empty helper card. Replaced by inline form when adding. */}
+        {adding ? (
+          <Modal visible animationType="slide" transparent onRequestClose={cancelForm}>
+            <KeyboardAvoidingView
+              style={styles.formBackdrop}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+            >
+              <View style={[styles.formSheet, { paddingBottom: insets.bottom + 16 }]}>
+                <View style={styles.formHeader}>
+                  <Text style={styles.formTitle}>
+                    {editingId ? 'Kavşak Düzenle' : 'Yeni Kavşak'}
+                  </Text>
+                  <Pressable
+                    onPress={cancelForm}
+                    hitSlop={10}
+                    style={({ pressed }) => [styles.formClose, pressed && styles.pressed]}
+                  >
+                    <IconSymbol name="close" size={22} color={t.text} />
+                  </Pressable>
+                </View>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, editingId && styles.inputDisabled]}
                   placeholder="intersection_id"
                   placeholderTextColor={t.textMuted}
                   autoCapitalize="characters"
@@ -341,46 +447,34 @@ export default function KavsakScreen() {
                   value={form.intersection_name}
                   onChangeText={(v) => setForm((f) => ({ ...f, intersection_name: v }))}
                 />
-                <View style={styles.row2}>
+                <View style={styles.formBtnRow}>
                   <Pressable
-                    style={({ pressed }) => [styles.btnSmall, styles.btnPrimary, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.btn, styles.btnPrimary, pressed && styles.pressed]}
                     onPress={save}
                   >
                     <Text style={styles.btnText}>Kaydet</Text>
                   </Pressable>
                   <Pressable
-                    style={({ pressed }) => [styles.btnSmall, styles.btnSecondary, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.btn, styles.btnSecondary, pressed && styles.pressed]}
                     onPress={cancelForm}
                   >
                     <Text style={styles.btnText}>İptal</Text>
                   </Pressable>
                 </View>
               </View>
-            ) : null
-          }
-        />
-
-        <View style={styles.footer}>
-          {!adding && (
+            </KeyboardAvoidingView>
+          </Modal>
+        ) : (
+          <View style={styles.footer}>
             <Pressable
-              style={({ pressed }) => [styles.btn, styles.btnPrimary, pressed && styles.pressed]}
+              style={({ pressed }) => [styles.stickyBtn, pressed && { opacity: 0.85 }]}
               onPress={openNew}
             >
-              <Text style={styles.btnText}>+ Yeni Kavşak Ekle</Text>
+              <IconSymbol name="add" size={22} color={t.textInverse} />
+              <Text style={styles.stickyBtnText}>Yeni Kavşak Ekle</Text>
             </Pressable>
-          )}
-          <Pressable
-            style={({ pressed }) => [
-              styles.btn,
-              styles.btnSecondary,
-              styles.btnTopMargin,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => router.push('/disa_aktar')}
-          >
-            <Text style={styles.btnText}>Dışa Aktar</Text>
-          </Pressable>
-        </View>
+          </View>
+        )}
       </KeyboardAvoidingView>
 
       <Modal
@@ -410,7 +504,9 @@ export default function KavsakScreen() {
                 >
                   {SORT_LABEL[m]}
                 </Text>
-                {sortMode === m ? <Text style={styles.sortMenuCheck}>✓</Text> : null}
+                {sortMode === m ? (
+                  <IconSymbol name="check" size={20} color={t.primary} />
+                ) : null}
               </Pressable>
             ))}
           </Pressable>
@@ -420,31 +516,86 @@ export default function KavsakScreen() {
   );
 }
 
+function ProgressRow({ row }: { row: RowState }) {
+  const t = useTheme();
+  const styles = progressStyles(t);
+  const target = row.assetCount * SHOTS_PER_ASSET_TARGET;
+  const pct = target === 0 ? 0 : Math.min(100, Math.round((row.shotCount / target) * 100));
+
+  if (row.assetCount === 0) {
+    return (
+      <View style={styles.headerRow}>
+        <Text style={styles.muted}>Asset ekleyince ilerleme görünecek.</Text>
+      </View>
+    );
+  }
+
+  if (pct >= 100) {
+    return (
+      <View style={styles.completeRow}>
+        <View style={styles.completeBadge}>
+          <IconSymbol name="check_circle" size={18} color={t.primary} />
+          <Text style={styles.completeBadgeText}>%100 Tamamlandı</Text>
+        </View>
+        <View style={styles.syncRow}>
+          <IconSymbol name="cloud_done" size={16} color={t.tertiary} />
+          <Text style={styles.syncText}>Senkronize</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (pct < 50) {
+    return (
+      <View>
+        <View style={styles.headerRow}>
+          <View style={styles.warnLabelBox}>
+            <IconSymbol name="warning" size={16} color={t.warn} />
+            <Text style={styles.warnLabel}>%{pct} Çekim (Eksik açılar)</Text>
+          </View>
+          <Text style={styles.counts}>
+            {row.shotCount} / {target} foto
+          </Text>
+        </View>
+        <ProgressBar value={pct} tone="warning" height={6} />
+      </View>
+    );
+  }
+
+  return (
+    <ProgressBar
+      value={pct}
+      label={`%${pct} Çekim Tamamlandı`}
+      caption={`${row.shotCount} / ${target} foto`}
+      tone="primary"
+      height={6}
+    />
+  );
+}
+
 function makeStyles(t: ReturnType<typeof useTheme>) {
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: t.bg },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    heroRow: {
+    headerWrap: { paddingHorizontal: 16, paddingTop: 12, gap: 12 },
+    searchBox: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingTop: 16,
-      paddingBottom: 8,
-    },
-    heroTitle: { fontSize: t.type.hero, fontWeight: '800', color: t.text },
-    heroSub: { fontSize: t.type.body, color: t.textMuted, marginTop: 2 },
-    iconBtn: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      backgroundColor: t.card,
-      alignItems: 'center',
-      justifyContent: 'center',
+      backgroundColor: t.cardLowest,
+      borderRadius: 10,
       borderWidth: 1,
       borderColor: t.border,
+      paddingHorizontal: 14,
+      minHeight: 48,
     },
-    iconBtnText: { fontSize: t.type.icon, fontWeight: '700', color: t.text },
-    sortBar: { flexDirection: 'row', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' },
+    searchIcon: { marginRight: 10 },
+    searchInput: {
+      flex: 1,
+      fontSize: t.type.bodyMd,
+      color: t.text,
+      paddingVertical: 0,
+    },
+    toolbarRow: { flexDirection: 'row', justifyContent: 'flex-end' },
     sortBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -454,15 +605,185 @@ function makeStyles(t: ReturnType<typeof useTheme>) {
       borderRadius: 10,
       borderWidth: 1,
       borderColor: t.border,
+      backgroundColor: t.cardLowest,
+    },
+    sortBtnLabel: { color: t.text, fontSize: 11, fontWeight: '700' },
+    sortBtnChevron: { color: t.textMuted, fontSize: 11, fontWeight: '700' },
+    emptyInline: { alignItems: 'center', padding: 24, gap: 6 },
+    emptyTitle: { fontSize: t.type.headlineSm, fontWeight: '700', color: t.text },
+    emptyBody: {
+      fontSize: t.type.bodySm,
+      color: t.textMuted,
+      textAlign: 'center',
+    },
+    row: { marginVertical: 6 },
+    cardMain: { flex: 1, gap: 8 },
+    cardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    idMono: {
+      fontSize: t.type.dataMonoLg,
+      fontWeight: '700',
+      color: t.primary,
+      fontFamily: 'monospace',
+      letterSpacing: -0.5,
+      flexShrink: 1,
+    },
+    assetPill: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 9999,
+      backgroundColor: t.cardHighest,
+    },
+    assetPillText: { fontSize: 11, fontWeight: '700', color: t.text },
+    title: { fontSize: t.type.titleMd, fontWeight: '600', color: t.text },
+    typesRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      backgroundColor: t.chipBg,
+      borderRadius: 8,
+    },
+    typeItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    typeDot: { width: 8, height: 8, borderRadius: 4 },
+    typeLabel: { fontSize: t.type.labelMd, fontWeight: '600', color: t.text },
+    actionRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 6,
+      marginTop: 8,
+    },
+    actionBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: t.chipBg,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    pressed: { opacity: 0.7, transform: [{ scale: 0.97 }] },
+    footer: { padding: 12, gap: 12, backgroundColor: t.bg },
+    emptyHint: {
+      backgroundColor: t.chipBg,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+      gap: 6,
+    },
+    emptyHintIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: t.cardHighest,
+    },
+    emptyHintTitle: {
+      fontSize: t.type.headlineSm,
+      fontWeight: '600',
+      color: t.text,
+    },
+    emptyHintBody: {
+      fontSize: t.type.bodySm,
+      color: t.textMuted,
+      textAlign: 'center',
+      maxWidth: 280,
+    },
+    emptyHintLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 10,
+    },
+    emptyHintLinkText: {
+      fontSize: t.type.labelLg,
+      fontWeight: '600',
+      color: t.primary,
+    },
+    stickyBtn: {
+      height: 50,
+      borderRadius: 12,
+      backgroundColor: t.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      shadowColor: '#000',
+      shadowOpacity: 0.2,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    stickyBtnText: { color: t.textInverse, fontWeight: '700', fontSize: t.type.labelLg },
+    formWrap: {
+      padding: 12,
+      backgroundColor: t.cardLowest,
+      borderTopWidth: 1,
+      borderTopColor: t.border,
+      gap: 8,
+    },
+    formBackdrop: {
+      flex: 1,
+      justifyContent: 'flex-end',
+      backgroundColor: t.overlay,
+    },
+    formSheet: {
+      backgroundColor: t.cardLowest,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      padding: 16,
+      gap: 12,
+      shadowColor: '#000',
+      shadowOpacity: 0.15,
+      shadowOffset: { width: 0, height: -4 },
+      shadowRadius: 12,
+      elevation: 8,
+    },
+    formHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingBottom: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: t.border,
+    },
+    formTitle: { fontSize: t.type.titleMd, fontWeight: '700', color: t.text },
+    formClose: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: t.chipBg,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: t.border,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      fontSize: t.type.bodyMd,
+      color: t.text,
       backgroundColor: t.chipBg,
     },
-    sortBtnLabel: { color: t.text, fontSize: t.type.caption, fontWeight: '700' },
-    sortBtnChevron: { color: t.textMuted, fontSize: t.type.caption, fontWeight: '700' },
-    modalBackdrop: {
+    inputDisabled: { opacity: 0.6, fontFamily: 'monospace' },
+    formBtnRow: { flexDirection: 'row', gap: 8 },
+    btn: {
       flex: 1,
-      backgroundColor: t.overlay,
+      paddingVertical: 14,
+      borderRadius: 10,
+      alignItems: 'center',
+      minHeight: 50,
       justifyContent: 'center',
     },
+    btnPrimary: { backgroundColor: t.primary },
+    btnSecondary: { backgroundColor: t.primaryAlt },
+    btnText: { color: t.textInverse, fontWeight: '700', fontSize: t.type.labelLg },
+    modalBackdrop: { flex: 1, backgroundColor: t.overlay, justifyContent: 'center' },
     sortMenuCard: {
       backgroundColor: t.cardElevated,
       marginHorizontal: 32,
@@ -477,7 +798,7 @@ function makeStyles(t: ReturnType<typeof useTheme>) {
       elevation: 6,
     },
     sortMenuTitle: {
-      fontSize: t.type.caption,
+      fontSize: 11,
       fontWeight: '700',
       color: t.textMuted,
       textTransform: 'uppercase',
@@ -494,112 +815,43 @@ function makeStyles(t: ReturnType<typeof useTheme>) {
       minHeight: 48,
     },
     sortMenuRowActive: { backgroundColor: t.chipBg },
-    sortMenuRowText: { color: t.text, fontSize: t.type.body, fontWeight: '500' },
+    sortMenuRowText: { color: t.text, fontSize: t.type.bodyMd, fontWeight: '500' },
     sortMenuRowTextActive: { color: t.primary, fontWeight: '700' },
-    sortMenuCheck: { color: t.primary, fontSize: t.type.body, fontWeight: '900' },
-    mapCard: {
+  });
+}
+
+function progressStyles(t: ReturnType<typeof useTheme>) {
+  return StyleSheet.create({
+    headerRow: {
       flexDirection: 'row',
+      justifyContent: 'space-between',
       alignItems: 'center',
-      backgroundColor: t.card,
-      marginHorizontal: 12,
-      marginTop: 6,
       marginBottom: 6,
-      padding: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: t.primary,
-      gap: 12,
-      shadowColor: t.shadow,
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.4,
-      shadowRadius: 4,
-      elevation: 2,
     },
-    mapEmoji: { fontSize: 32 },
-    mapTitle: { fontSize: t.type.body, fontWeight: '700', color: t.text },
-    mapSub: { fontSize: t.type.caption, color: t.textMuted, marginTop: 2 },
-    mapChevron: { fontSize: 32, color: t.primary, fontWeight: '300' },
-    row: {
-      backgroundColor: t.card,
-      paddingVertical: 14,
-      paddingHorizontal: 14,
-      marginVertical: 6,
-      marginHorizontal: 12,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: t.border,
+    muted: { fontSize: 11, color: t.textMuted },
+    warnLabelBox: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    warnLabel: { fontSize: 11, fontWeight: '600', color: t.danger },
+    counts: { fontSize: 11, color: t.textMuted, fontFamily: 'monospace' },
+    completeRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      shadowColor: t.shadow,
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.4,
-      shadowRadius: 3,
-      elevation: 1,
+      justifyContent: 'space-between',
     },
-    rowMain: { flex: 1 },
-    rowTitle: { fontSize: t.type.title, fontWeight: '700', color: t.text },
-    rowSubtitle: { fontSize: t.type.caption, color: t.textMuted, marginTop: 1, fontStyle: 'italic' },
-    rowMeta: { fontSize: t.type.caption, color: t.textMuted, marginTop: 2 },
-    rowActions: { flexDirection: 'row', gap: 6, paddingRight: 4 },
-    emptyWrap: { flexGrow: 1, justifyContent: 'center' },
-    empty: { alignItems: 'center', padding: 24 },
-    emptyEmoji: { fontSize: 64, marginBottom: 8 },
-    emptyTitle: { fontSize: t.type.title, fontWeight: '700', color: t.text, marginBottom: 6 },
-    emptyBody: { fontSize: t.type.body, color: t.textMuted, textAlign: 'center', lineHeight: 22 },
-    footer: { padding: 12, backgroundColor: t.bg, borderTopWidth: 1, borderTopColor: t.border },
-    formCard: {
-      backgroundColor: t.card,
-      padding: 14,
-      marginHorizontal: 12,
-      marginTop: 8,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: t.border,
-      gap: 10,
-      shadowColor: t.shadow,
-      shadowOffset: { width: 0, height: -2 },
-      shadowOpacity: 0.3,
-      shadowRadius: 4,
-      elevation: 4,
-    },
-    formTitle: { fontSize: t.type.title - 2, fontWeight: '700', color: t.text },
-    btn: {
-      paddingVertical: 16,
-      paddingHorizontal: 16,
-      borderRadius: 12,
+    completeBadge: {
+      flexDirection: 'row',
       alignItems: 'center',
-      minHeight: 54,
-      justifyContent: 'center',
-      shadowColor: t.shadow,
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.3,
-      shadowRadius: 4,
-      elevation: 3,
-    },
-    btnPrimary: { backgroundColor: t.primary },
-    btnSecondary: { backgroundColor: t.primaryAlt },
-    btnTopMargin: { marginTop: 10 },
-    btnSmall: {
-      flex: 1,
-      paddingVertical: 14,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      alignItems: 'center',
-      minHeight: 50,
-      justifyContent: 'center',
-    },
-    pressed: { opacity: 0.7, transform: [{ scale: 0.97 }] },
-    btnText: { color: t.textInverse, fontWeight: '700', fontSize: t.type.btn },
-    row2: { flexDirection: 'row', gap: 8 },
-    input: {
-      borderWidth: 1,
-      borderColor: t.border,
-      borderRadius: 10,
+      gap: 6,
       paddingHorizontal: 12,
-      paddingVertical: 12,
-      fontSize: t.type.body,
-      color: t.text,
-      backgroundColor: t.chipBg,
+      paddingVertical: 6,
+      borderRadius: 9999,
+      backgroundColor: t.tertiaryContainer,
     },
+    completeBadgeText: {
+      fontSize: t.type.labelMd,
+      fontWeight: '700',
+      color: t.primary,
+    },
+    syncRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    syncText: { fontSize: 11, color: t.tertiary, fontWeight: '600' },
   });
 }

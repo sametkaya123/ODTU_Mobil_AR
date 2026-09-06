@@ -26,12 +26,14 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.9.1",
+    "react-native-svg": "^15.15.5",
     "react-native-web": "~0.21.0",
     "react-native-webview": "13.16.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "@types/react": "~19.2.0",
+    "eas-cli": "^23.2.0",
     "hermes-compiler": "^250829098.0.17",
     "typescript": "~5.9.0"
   },

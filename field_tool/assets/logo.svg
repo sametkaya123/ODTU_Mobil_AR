@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="ODTU Mobil AR logo">
+  <!-- Bg rounded square (primaryContainer) -->
+  <rect x="0" y="0" width="200" height="200" rx="44" fill="#0F6E6E"/>
+
+  <!-- Pin teardrop (left) -->
+  <path d="M70,42 C49,42 33,58 33,79 C33,104 70,148 70,148 C70,148 107,104 107,79 C107,58 91,42 70,42 Z" fill="#FFFFFF"/>
+
+  <!-- Aperture (white circle inside pin is the body; we draw darker teal blade hints on it) -->
+  <circle cx="70" cy="79" r="26" fill="#0F6E6E"/>
+
+  <!-- 6 blade segments as subtle triangles -->
+  <g transform="translate(70 79)" fill="#FFFFFF" opacity="0.18">
+    <polygon points="0,0 24,-7 -24,-7"/>
+    <polygon points="0,0 24,-7 -24,-7" transform="rotate(60)"/>
+    <polygon points="0,0 24,-7 -24,-7" transform="rotate(120)"/>
+    <polygon points="0,0 24,-7 -24,-7" transform="rotate(180)"/>
+    <polygon points="0,0 24,-7 -24,-7" transform="rotate(240)"/>
+    <polygon points="0,0 24,-7 -24,-7" transform="rotate(300)"/>
+  </g>
+
+  <!-- Aperture outer ring (subtle teal) -->
+  <circle cx="70" cy="79" r="11" fill="none" stroke="#FFFFFF" stroke-width="3"/>
+
+  <!-- Pupil -->
+  <circle cx="70" cy="79" r="3.5" fill="#FFFFFF"/>
+
+  <!-- Traffic light (right of pin) — 3 stacked dots -->
+  <rect x="118" y="42" width="22" height="62" rx="6" fill="#FFFFFF" opacity="0.18"/>
+  <circle cx="129" cy="55" r="6" fill="#D33A2C"/>
+  <circle cx="129" cy="73" r="6" fill="#2563EB"/>
+  <circle cx="129" cy="91" r="6" fill="#16A34A"/>
+
+  <!-- Cabinet pole (right side bottom) with 2 horizontal arms -->
+  <g fill="#FFFFFF" opacity="0.55">
+    <rect x="160" y="78" width="6" height="100"/>
+    <rect x="140" y="100" width="32" height="4"/>
+    <rect x="140" y="138" width="32" height="4"/>
+  </g>
+
+  <!-- Bus-stop small square (bottom) -->
+  <rect x="55" y="156" width="30" height="30" rx="4" fill="#16A34A"/>
+  <text x="70" y="178" text-anchor="middle" font-family="sans-serif" font-size="20" font-weight="700" fill="#FFFFFF">B</text>
+</svg>

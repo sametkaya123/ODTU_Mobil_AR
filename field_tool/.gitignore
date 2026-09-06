@@ -18,11 +18,13 @@ ios/
 # Local build outputs (gradle / xcode / EAS local)
 *.apk
 *.aab
+*.ipa
 .gradle/
 build/
 
-# macOS
+# OS
 .DS_Store
+Thumbs.db
 
 # Logs
 *.log
@@ -40,3 +42,25 @@ expo-env.d.ts
 # Metro
 .metro-health-check*
 metro-*
+
+# Claude local state
+.claude/
+
+# Local docs / scratch (kept under field_tool/)
+*.bak
+*.tmp
+tmp/
+tmp_*/
+*.local
+
+# Test / coverage
+coverage/
+
+# Bundled screenshots / recordings used for debugging only
+*.png.bak
+screenshots/
+
+# Draft screens (kept locally for reference; not part of the app)
+app/*-yeni.tsx
+app/*-utility*.tsx
+app/onboarding.tsx

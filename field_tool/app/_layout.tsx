@@ -1,38 +1,48 @@
-import { useEffect } from 'react';
-import { AppState, type AppStateStatus, Pressable, StyleSheet, Text } from 'react-native';
-import { Stack } from 'expo-router';
+import { useEffect, useState } from 'react';
+import {
+  AppState,
+  type AppStateStatus,
+  View,
+} from 'react-native';
+import * as Font from 'expo-font';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme, useThemeMode } from '@/lib/theme';
 import { AlertProvider } from '@/components/Alert';
+import { AppHeader } from '@/components/AppHeader';
+import { BottomTabNav, type TabKey } from '@/components/BottomTabNav';
 import { lockMaxBrightness, restoreBrightness } from '@/lib/brightness';
-import type { ThemeMode } from '@/lib/theme';
 
-// Cycle hint: light→dark→saha→light. Icon previews the NEXT mode's mood.
-function cycleIcon(mode: ThemeMode): string {
-  if (mode === 'light') return '☾'; // go dark next
-  if (mode === 'dark') return '☀︎'; // go saha (sun) next
-  return '☾'; // saha → light
+// Material Symbols Outlined bundled locally — works offline. Falls back to
+// system font if metro can't resolve the asset (still renders a glyph).
+function subtitleFor(pathname: string | null | undefined): string {
+  if (!pathname) return 'Saha Aracı';
+  if (pathname.startsWith('/ayarlar')) return 'Ayarlar';
+  if (pathname.startsWith('/harita')) return 'Harita';
+  if (pathname.startsWith('/disa_aktar')) return 'Dışa Aktar';
+  if (pathname.startsWith('/onboarding')) return 'Hoş Geldin';
+  if (pathname.startsWith('/asset-yeni')) return 'Yeni Asset';
+  if (pathname.startsWith('/kavsak-yeni')) return 'Yeni Kavşak';
+  if (pathname.startsWith('/cekim')) return 'Çekim';
+  if (pathname.startsWith('/kavsak')) return 'Kavşak';
+  if (pathname.startsWith('/asset')) return 'Asset';
+  return 'Saha Aracı';
 }
 
-function ThemeToggle() {
-  const { mode, toggle } = useThemeMode();
-  const t = useTheme();
-  const styles = toggleStyles(t);
-  return (
-    <Pressable
-      onPress={toggle}
-      hitSlop={12}
-      style={({ pressed }) => [styles.toggle, pressed && { opacity: 0.5 }]}
-    >
-      <Text style={styles.toggleIcon}>{cycleIcon(mode)}</Text>
-    </Pressable>
-  );
+function activeFor(pathname: string | null | undefined): TabKey {
+  if (!pathname) return 'kavsak';
+  if (pathname.startsWith('/ayarlar')) return 'ayarlar';
+  if (pathname.startsWith('/harita')) return 'harita';
+  if (pathname.startsWith('/disa_aktar')) return 'disa_aktar';
+  if (pathname.startsWith('/kavsak')) return 'kavsak';
+  return 'kavsak';
 }
 
 function StackShell() {
   const { mode } = useThemeMode();
   const t = useTheme();
+  const pathname = usePathname();
 
   // Re-apply brightness when app returns to foreground.
   // System can revert override on background; lock again if still saha.
@@ -51,31 +61,49 @@ function StackShell() {
   const statusBarStyle: 'light' | 'dark' = mode === 'light' ? 'dark' : 'light';
 
   return (
-    <>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
       <StatusBar style={statusBarStyle} />
+      <AppHeader subtitle={subtitleFor(pathname)} />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: t.headerBg },
-          headerTintColor: t.headerText,
-          headerTitleStyle: { fontWeight: '700', fontSize: t.type.title },
-          headerRight: () => <ThemeToggle />,
+          headerShown: false,
           contentStyle: { backgroundColor: t.bg },
-          headerShadowVisible: false,
         }}
       >
-        <Stack.Screen name="index" options={{ title: 'Saha Aracı' }} />
-        <Stack.Screen name="kavsak" options={{ title: 'Kavşak Seç' }} />
-        <Stack.Screen name="asset" options={{ title: 'Asset Seç' }} />
-        <Stack.Screen name="cekim" options={{ title: 'Çekim' }} />
-        <Stack.Screen name="disa_aktar" options={{ title: 'Dışa Aktar' }} />
-        <Stack.Screen name="ayarlar" options={{ title: 'Ayarlar' }} />
-        <Stack.Screen name="harita" options={{ title: '🗺️ Harita' }} />
+        <Stack.Screen name="index" />
+        <Stack.Screen name="kavsak" />
+        <Stack.Screen name="asset" />
+        <Stack.Screen name="cekim" />
+        <Stack.Screen name="disa_aktar" />
+        <Stack.Screen name="ayarlar" />
+        <Stack.Screen name="harita" />
+        <Stack.Screen name="onboarding" />
+        <Stack.Screen name="kavsak-yeni" />
+        <Stack.Screen name="asset-yeni" />
       </Stack>
-    </>
+      <BottomTabNav active={activeFor(pathname)} />
+    </View>
   );
 }
 
 export default function RootLayout() {
+  const [fontReady, setFontReady] = useState(false);
+
+  useEffect(() => {
+    // Hold the first frame until the bundled icon font is mounted. Local
+    // require avoids the previous CDN load that failed in the field.
+    Font.loadAsync({
+      MaterialSymbolsOutlined: require('../assets/fonts/MaterialSymbolsOutlined.ttf'),
+    })
+      .catch(() => {})
+      .finally(() => setFontReady(true));
+  }, []);
+
+  if (!fontReady) {
+    // Empty frame keeps the splash up until the font attempt settles.
+    return <SafeAreaProvider />;
+  }
+
   return (
     <SafeAreaProvider>
       <ThemeProvider>
@@ -85,17 +113,4 @@ export default function RootLayout() {
       </ThemeProvider>
     </SafeAreaProvider>
   );
-}
-
-function toggleStyles(t: ReturnType<typeof useTheme>) {
-  return StyleSheet.create({
-    toggle: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    toggleIcon: { fontSize: t.type.icon, color: t.primary },
-  });
 }

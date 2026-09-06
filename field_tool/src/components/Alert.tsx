@@ -43,6 +43,13 @@ interface AlertContextValue {
 
 const AlertContext = createContext<AlertContextValue | null>(null);
 
+// Heuristic: Turkish destructive titles ("Sil", "Sıfırla") render a danger
+// icon-circle above the title. Cheap string scan — no i18n table needed.
+function isDestructiveTitle(title: string): boolean {
+  const lower = title.toLowerCase();
+  return lower.includes('sil') || lower.includes('sıfırla');
+}
+
 export function AlertProvider({ children }: { children: ReactNode }) {
   const t = useTheme();
   const styles = useMemo(() => makeStyles(t), [t]);
@@ -87,6 +94,7 @@ export function AlertProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AlertContextValue>(() => ({ alert, confirm }), [alert, confirm]);
 
   const current = queue[0];
+  const showDangerIcon = current ? isDestructiveTitle(current.options.title) : false;
 
   return (
     <AlertContext.Provider value={value}>
@@ -99,6 +107,11 @@ export function AlertProvider({ children }: { children: ReactNode }) {
       >
         <View style={styles.backdrop}>
           <View style={styles.card}>
+            {showDangerIcon ? (
+              <View style={styles.iconCircle}>
+                <Text style={styles.iconText} allowFontScaling={false}>!</Text>
+              </View>
+            ) : null}
             <Text style={styles.title}>{current?.options.title ?? ''}</Text>
             {current?.options.message ? (
               <Text style={styles.message}>{current.options.message}</Text>
@@ -153,7 +166,7 @@ function makeStyles(t: ReturnType<typeof useTheme>) {
       paddingHorizontal: 24,
     },
     card: {
-      backgroundColor: t.cardElevated,
+      backgroundColor: t.cardLowest,
       borderRadius: 16,
       padding: 20,
       borderWidth: 1,
@@ -163,6 +176,23 @@ function makeStyles(t: ReturnType<typeof useTheme>) {
       shadowOpacity: 0.6,
       shadowRadius: 8,
       elevation: 6,
+    },
+    iconCircle: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: t.dangerContainer,
+      alignSelf: 'center',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+    },
+    iconText: {
+      color: t.onDangerContainer,
+      fontSize: 28,
+      fontWeight: '700',
+      lineHeight: 32,
+      includeFontPadding: false,
     },
     title: { color: t.text, fontSize: t.type.title, fontWeight: '700' },
     message: { color: t.text, fontSize: t.type.body, marginTop: 10, lineHeight: 22 },

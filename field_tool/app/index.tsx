@@ -1,11 +1,16 @@
+// Orchestrator: first-run gates onboarding, then runs the camera+location
+// permission flow. Skipping is allowed when permissions are partial / denied.
+
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { Camera } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useTheme } from '@/lib/theme';
+import { ONBOARDING_FLAG } from './onboarding';
 
 type PermState = 'checking' | 'granted' | 'partial' | 'denied';
 
@@ -18,6 +23,11 @@ export default function PermissionsGate() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const seen = await AsyncStorage.getItem(ONBOARDING_FLAG).catch(() => null);
+      if (cancelled || seen !== '1') {
+        if (!cancelled) router.replace('/onboarding' as never);
+        return;
+      }
       const [camRes, locRes] = await Promise.all([
         Camera.requestCameraPermissionsAsync(),
         Location.requestForegroundPermissionsAsync(),
@@ -32,7 +42,7 @@ export default function PermissionsGate() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (state === 'granted') {
@@ -40,6 +50,8 @@ export default function PermissionsGate() {
       router.replace('/kavsak');
     }
   }, [state, router]);
+
+  const skip = () => router.replace('/kavsak');
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -69,9 +81,12 @@ export default function PermissionsGate() {
             </Text>
             <Pressable
               style={({ pressed }) => [styles.btn, pressed && styles.pressed]}
-              onPress={() => router.replace('/kavsak')}
+              onPress={skip}
             >
               <Text style={styles.btnText}>Devam Et</Text>
+            </Pressable>
+            <Pressable style={styles.skipBtn} onPress={skip}>
+              <Text style={styles.skipText}>Geç</Text>
             </Pressable>
           </View>
         )}
@@ -83,9 +98,12 @@ export default function PermissionsGate() {
             </Text>
             <Pressable
               style={({ pressed }) => [styles.btn, pressed && styles.pressed]}
-              onPress={() => router.replace('/kavsak')}
+              onPress={skip}
             >
               <Text style={styles.btnText}>Yine de Devam Et</Text>
+            </Pressable>
+            <Pressable style={styles.skipBtn} onPress={skip}>
+              <Text style={styles.skipText}>Geç</Text>
             </Pressable>
           </View>
         )}
@@ -132,5 +150,15 @@ function makeStyles(t: ReturnType<typeof useTheme>) {
     },
     pressed: { opacity: 0.7, transform: [{ scale: 0.97 }] },
     btnText: { color: t.textInverse, fontWeight: '700', fontSize: t.type.btn },
+    skipBtn: {
+      marginTop: 8,
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    skipText: {
+      color: t.textMuted,
+      fontWeight: '600',
+      fontSize: t.type.labelLg,
+    },
   });
 }

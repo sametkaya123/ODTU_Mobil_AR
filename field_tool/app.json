@@ -9,9 +9,17 @@
     "newArchEnabled": true,
     "splash": {
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0F6E6E",
+      "image": "./assets/splash-icon.png"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "assets/**/*",
+      "**/*.jpg",
+      "**/*.png",
+      "**/*.webp",
+      "**/*.svg",
+      "**/*.ttf"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "edu.metu.odtumobil.fieldtool"
@@ -19,10 +27,10 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0F6E6E"
       },
       "package": "edu.metu.odtumobil.fieldtool",
-      "softwareKeyboardLayoutMode": "pan",
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -30,7 +38,8 @@
       ]
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-camera",
@@ -39,6 +48,11 @@
     "experiments": {
       "typedRoutes": true
     },
-    "scheme": "fieldtool"
+    "scheme": "fieldtool",
+    "extra": {
+      "eas": {
+        "projectId": "ee9af6a3-2229-403f-ae15-9088b99193fb"
+      }
+    }
   }
 }
