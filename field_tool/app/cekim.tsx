@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, type FlashMode } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { useLocalSearchParams } from 'expo-router';
@@ -75,6 +75,7 @@ export default function CekimScreen() {
   const [shots, setShots] = useState<ReferenceImage[]>([]);
   const [asset, setAsset] = useState<Asset | null>(null);
   const [peekOpen, setPeekOpen] = useState(true);
+  const [flashMode, setFlashMode] = useState<FlashMode>('off');
   const [flashVisible, setFlashVisible] = useState(false);
   const [pendingIdx, setPendingIdx] = useState<number | null>(null);
   const [pendingUri, setPendingUri] = useState<string | null>(null);
@@ -420,6 +421,7 @@ export default function CekimScreen() {
                   ref={camRef}
                   style={StyleSheet.absoluteFill}
                   facing="back"
+                  flash={flashMode}
                 />
               )}
 
@@ -469,11 +471,18 @@ export default function CekimScreen() {
           <Card padded={false} style={styles.controlsCard}>
             <View style={styles.controlsRow}>
               <Pressable
-                onPress={() => Haptics.selectionAsync().catch(() => {})}
+                onPress={() => {
+                  setFlashMode((m) => (m === 'off' ? 'on' : m === 'on' ? 'auto' : 'off'));
+                  Haptics.selectionAsync().catch(() => {});
+                }}
                 style={({ pressed }) => [styles.flashBtn, pressed && styles.pressed]}
-                accessibilityLabel="Flaş ve Poz Kilidi"
+                accessibilityLabel={`Flaş: ${flashMode}`}
               >
-                <IconSymbol name="flash_auto" size={24} color={t.text} />
+                <IconSymbol
+                  name={flashMode === 'on' ? 'flash_on' : flashMode === 'auto' ? 'flash_auto' : 'flash_off'}
+                  size={24}
+                  color={flashMode === 'off' ? t.text : t.primary}
+                />
               </Pressable>
 
               <Pressable

@@ -331,6 +331,16 @@ export default function KavsakScreen() {
                   <Text style={styles.sortBtnChevron}>▾</Text>
                 </Pressable>
               </View>
+
+              {/* Add-new shortcut row — kept compact; primary entry stays the bottom sticky button. */}
+              <Pressable
+                style={({ pressed }) => [styles.addShortcut, pressed && styles.pressed]}
+                onPress={openNew}
+                accessibilityLabel="Yeni Kavşak Ekle"
+              >
+                <IconSymbol name="add_circle" size={20} color={t.primary} />
+                <Text style={styles.addShortcutText}>Yeni Kavşak Ekle</Text>
+              </Pressable>
             </View>
           }
           ListEmptyComponent={
@@ -596,6 +606,22 @@ function makeStyles(t: ReturnType<typeof useTheme>) {
       paddingVertical: 0,
     },
     toolbarRow: { flexDirection: 'row', justifyContent: 'flex-end' },
+    addShortcut: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      backgroundColor: t.chipBg,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    addShortcutText: {
+      fontSize: t.type.labelLg,
+      fontWeight: '700',
+      color: t.primary,
+    },
     sortBtn: {
       flexDirection: 'row',
       alignItems: 'center',
