@@ -217,16 +217,14 @@ export default function KavsakScreen() {
     if (!id) return;
     const intersection_name = form.intersection_name.trim() || undefined;
     if (editingId) {
-      const existing = await storage.getIntersections();
-      const ix = existing.find((x) => x.intersection_id === editingId);
+      const ix = await storage.getIntersection(editingId);
       if (!ix) {
         cancelForm();
         return;
       }
       const updated: Intersection = { ...ix, ...(intersection_name ? { intersection_name } : {}) };
       if (!intersection_name) delete updated.intersection_name;
-      const others = existing.filter((x) => x.intersection_id !== editingId);
-      await storage.setIntersections([...others, updated]);
+      await storage.updateIntersection(updated);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       cancelForm();
       await load();
@@ -253,17 +251,11 @@ export default function KavsakScreen() {
         confirmText: 'Sil',
       }).then(async (ok) => {
         if (!ok) return;
-        const allAssets = await storage.getAssets();
-        const targets = allAssets.filter(
-          (a) => a.intersection_id === r.intersection.intersection_id,
-        );
+        const targets = await storage.getAssetsByIntersection(r.intersection.intersection_id);
         for (const a of targets) {
-          await storage.removeAsset(a.asset_id);
+          await storage.removeAsset(a);
         }
-        const allIx = await storage.getIntersections();
-        await storage.setIntersections(
-          allIx.filter((x) => x.intersection_id !== r.intersection.intersection_id),
-        );
+        await storage.removeIntersection(r.intersection.intersection_id);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
         await load();
       });

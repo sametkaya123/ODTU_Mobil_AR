@@ -1,11 +1,19 @@
 // Fast zip via JSZip (pure JS — works in Expo Go).
 // Optimizations:
-//   - Parallel file reads via Promise.all (no sequential FS roundtrips)
+//   - Bounded-concurrency file reads (no OOM from loading 30-40+ photos as
+//     base64 all at once — each batch's strings are freed before the next)
 //   - STORE compression for JPEGs (already compressed — DEFLATE wastes CPU)
-//   - DEFLATE only for text-ish files (manifest.json, etc.) — small impact
+//   - Streamed output write via the native FileHandle/WritableStream API
+//     (avoids building one giant base64 string for the whole zip in memory
+//     and avoids the old bridge's argument-size limit on writeAsStringAsync)
 
 import JSZip from 'jszip';
 import * as FS from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
+
+// How many files to read into memory at once. Caps peak memory regardless
+// of how many photos are being exported.
+const READ_BATCH_SIZE = 6;
 
 async function listFilesRecursive(root: string): Promise<string[]> {
   const out: string[] = [];
@@ -46,35 +54,50 @@ function isJpegPath(p: string): boolean {
   return lower.endsWith('.jpg') || lower.endsWith('.jpeg');
 }
 
+/** Writes the zip to disk as a byte stream — never holds the whole zip in one buffer. */
+async function writeZipToFile(zip: JSZip, destinationZip: string): Promise<void> {
+  const writer = new File(destinationZip).writableStream().getWriter();
+  await new Promise<void>((resolve, reject) => {
+    const stream = zip.generateInternalStream({ type: 'uint8array', compression: 'STORE' });
+    stream
+      .on('data', (chunk: Uint8Array) => {
+        stream.pause();
+        writer.write(chunk).then(() => stream.resume(), reject);
+      })
+      .on('error', reject)
+      .on('end', () => resolve())
+      .resume();
+  });
+  await writer.close();
+}
+
 export async function zipFolder(sourceFolder: string, destinationZip: string): Promise<string> {
   const files = await listFilesRecursive(sourceFolder);
 
-  // Read all files in parallel — no sequential bridge calls.
-  const contents = await Promise.all(
-    files.map(async (full) => {
-      const rel = relPath(sourceFolder, full);
-      const base64 = await FS.readAsStringAsync(full, { encoding: FS.EncodingType.Base64 });
-      return { rel, base64, jpeg: isJpegPath(rel) };
-    }),
-  );
-
   const zip = new JSZip();
-  for (const c of contents) {
-    // STORE: no recompression. JPEGs are already compressed; manifest.json is tiny.
-    zip.file(c.rel, c.base64, { base64: true, compression: 'STORE' });
+  // Read in small batches instead of Promise.all-ing every photo's base64 at
+  // once — with 30-40+ photos that blew the JS heap (each entry is ~33%
+  // bigger than the JPEG itself, all held simultaneously).
+  for (let i = 0; i < files.length; i += READ_BATCH_SIZE) {
+    const batch = files.slice(i, i + READ_BATCH_SIZE);
+    const entries = await Promise.all(
+      batch.map(async (full) => {
+        const rel = relPath(sourceFolder, full);
+        const base64 = await FS.readAsStringAsync(full, { encoding: FS.EncodingType.Base64 });
+        return { rel, base64, jpeg: isJpegPath(rel) };
+      }),
+    );
+    for (const c of entries) {
+      // STORE: no recompression. JPEGs are already compressed; manifest.json is tiny.
+      zip.file(c.rel, c.base64, { base64: true, compression: 'STORE' });
+    }
   }
-
-  // Generate as base64 — STORE keeps it fast.
-  const out = await zip.generateAsync({
-    type: 'base64',
-    compression: 'STORE',
-  });
 
   try {
     await FS.deleteAsync(destinationZip, { idempotent: true });
   } catch {
     /* ok */
   }
-  await FS.writeAsStringAsync(destinationZip, out, { encoding: FS.EncodingType.Base64 });
+  await writeZipToFile(zip, destinationZip);
   return destinationZip;
 }

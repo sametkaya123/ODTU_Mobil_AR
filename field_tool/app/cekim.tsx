@@ -47,7 +47,18 @@ import type {
 
 const DISTANCES: readonly DistanceM[] = [5, 10, 15, 20, 30];
 
+// A retaken shot reuses the same numbered file path (nextFileIndex recomputes
+// the same slot once the unsaved photo is deleted), but RN's <Image> caches
+// natively by URI string and won't notice the file on disk changed. Tagging
+// the URI with a version (capture time, or the shot's captured_at once
+// saved) gives every rewrite of the same path a distinct cache key.
+function withCacheBust(uri: string, version: string | number): string {
+  return `${uri}?v=${version}`;
+}
+
 type Phase = 'IDLE' | 'PREVIEW' | 'CAPTURING' | 'SAVED';
+
+const CAMERA_WARMUP_MS = 400;
 
 const TYPE_COLOR: Record<AssetType, string> = {
   traffic_signal: 'signal',
@@ -79,11 +90,32 @@ export default function CekimScreen() {
   const [flashVisible, setFlashVisible] = useState(false);
   const [pendingIdx, setPendingIdx] = useState<number | null>(null);
   const [pendingUri, setPendingUri] = useState<string | null>(null);
+  const [cameraWarming, setCameraWarming] = useState(false);
   type FullscreenTarget =
     | { kind: 'preview' }
     | { kind: 'shot'; shot: ReferenceImage };
   const [fullscreen, setFullscreen] = useState<FullscreenTarget | null>(null);
   const camRef = useRef<CameraView>(null);
+
+  // Next file index to hand out, held in memory so a retake (which deletes
+  // the just-captured, not-yet-saved file) never hands the same index out
+  // twice. Recomputing it from disk after every delete used to reuse the
+  // freed slot — same path written again — and RN's <Image> shows a stale
+  // native cache for a local file it's already displayed at that URI.
+  // Monotonic-only avoids the whole class of bug instead of fighting cache
+  // invalidation. Re-seeded from disk whenever the asset changes.
+  const nextIdxRef = useRef<number>(1);
+  useEffect(() => {
+    let live = true;
+    if (aId) {
+      nextFileIndex(ixId, aId).then((n) => {
+        if (live) nextIdxRef.current = n;
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [ixId, aId]);
 
   const loadShots = useCallback(async () => {
     if (!aId) return;
@@ -164,10 +196,11 @@ export default function CekimScreen() {
     try {
       const photo = await camRef.current.takePictureAsync({ quality: 0.85 });
       if (!photo?.uri) throw new Error('Foto alınamadı.');
-      const idx = await nextFileIndex(ixId, aId);
+      const idx = nextIdxRef.current;
+      nextIdxRef.current = idx + 1; // never reused, even if this shot is retaken/deleted
       const finalUri = await savePhoto(photo.uri, ixId, aId, idx);
       setPendingIdx(idx);
-      setPendingUri(finalUri);
+      setPendingUri(withCacheBust(finalUri, Date.now()));
       setPhase('SAVED');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     } catch (e: unknown) {
@@ -210,6 +243,18 @@ export default function CekimScreen() {
     setPendingUri(null);
     setPhase(distance && angle && light && posture ? 'PREVIEW' : 'IDLE');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    // ponytail: heuristic warm-up lock. Confirmed (idx + source temp-file
+    // both fresh on every capture, via on-screen debug readout) that the
+    // saved JPEG itself holds a stale buffered frame the first time the
+    // shutter fires right after the live preview resumes from being
+    // covered by the SAVED-phase preview overlay. expo-camera exposes no
+    // "next frame is live" signal to wait on, so this just blocks the
+    // shutter briefly to give the sensor pipeline time to catch up.
+    // Ceiling: guesswork delay, not a guaranteed fix — raise CAMERA_WARMUP_MS
+    // if the bug still reproduces, or replace with a real readiness check
+    // if expo-camera ever exposes one.
+    setCameraWarming(true);
+    setTimeout(() => setCameraWarming(false), CAMERA_WARMUP_MS);
   }, [pendingIdx, ixId, aId, distance, angle, light, posture]);
 
   const removeShotCompletely = useCallback(
@@ -289,6 +334,15 @@ export default function CekimScreen() {
     asset?.type === 'traffic_signal' && asset.signal_group_id
       ? ` (Sinyal Grubu ${asset.signal_group_id})`
       : '';
+
+  const shutterDisabled =
+    phase === 'CAPTURING' ||
+    phase === 'SAVED' ||
+    cameraWarming ||
+    !distance ||
+    !angle ||
+    !light ||
+    !posture;
 
   // Last 6 shots for the mini preview grid.
   const last6 = useMemo(
@@ -405,6 +459,19 @@ export default function CekimScreen() {
           {/* 4. Camera viewfinder (Card padding=0, aspect 16:9, dark bg) */}
           <Card padded={false} style={styles.viewfinderCard}>
             <View style={styles.viewfinder}>
+              {/* CameraView stays mounted at all times — swapping it out for
+                  the JPEG preview and remounting it on retake let Android's
+                  camera pipeline hand back a stale buffered frame from
+                  before the session restarted (the actual bug: the saved
+                  file itself held the old photo, not just its on-screen
+                  preview). The preview is drawn as an overlay on top
+                  instead, so the camera session never restarts. */}
+              <CameraView
+                ref={camRef}
+                style={StyleSheet.absoluteFill}
+                facing="back"
+                flash={flashMode}
+              />
               {phase === 'SAVED' && pendingUri ? (
                 <Pressable
                   style={StyleSheet.absoluteFill}
@@ -416,14 +483,7 @@ export default function CekimScreen() {
                     resizeMode="contain"
                   />
                 </Pressable>
-              ) : (
-                <CameraView
-                  ref={camRef}
-                  style={StyleSheet.absoluteFill}
-                  facing="back"
-                  flash={flashMode}
-                />
-              )}
+              ) : null}
 
               {/* Top telemetry strip — reflects real recording parameters. */}
               <View style={styles.topStrip} pointerEvents="none">
@@ -487,29 +547,18 @@ export default function CekimScreen() {
 
               <Pressable
                 onPress={onShutter}
-                disabled={
-                  phase === 'CAPTURING' ||
-                  phase === 'SAVED' ||
-                  !distance ||
-                  !angle ||
-                  !light ||
-                  !posture
-                }
+                disabled={shutterDisabled}
                 style={({ pressed }) => [
                   styles.shutterOuter,
-                  (phase === 'CAPTURING' ||
-                    phase === 'SAVED' ||
-                    !distance ||
-                    !angle ||
-                    !light ||
-                    !posture) &&
-                    styles.shutterDisabled,
+                  shutterDisabled && styles.shutterDisabled,
                   pressed && { transform: [{ scale: 0.95 }] },
                 ]}
                 accessibilityLabel={
                   !distance || !angle || !light || !posture
                     ? 'Önce Mesafe, Açı, Işık ve Poz seç'
-                    : 'Fotoğraf Çek'
+                    : cameraWarming
+                      ? 'Kamera hazırlanıyor…'
+                      : 'Fotoğraf Çek'
                 }
               >
                 <View style={styles.shutterInner}>
@@ -531,7 +580,9 @@ export default function CekimScreen() {
                       <View key={i} style={styles.miniCell}>
                         {shot ? (
                           <Image
-                            source={{ uri: photoPath(ixId, aId, shot.file_index) }}
+                            source={{
+                              uri: withCacheBust(photoPath(ixId, aId, shot.file_index), shot.captured_at),
+                            }}
                             style={StyleSheet.absoluteFill}
                           />
                         ) : null}
@@ -635,7 +686,10 @@ export default function CekimScreen() {
             uri={
               fullscreen.kind === 'preview'
                 ? (pendingUri ?? '')
-                : photoPath(ixId, aId, fullscreen.shot.file_index)
+                : withCacheBust(
+                    photoPath(ixId, aId, fullscreen.shot.file_index),
+                    fullscreen.shot.captured_at,
+                  )
             }
             meta={
               fullscreen.kind === 'preview'
@@ -770,7 +824,7 @@ function PeekRow({
         accessibilityLabel="Fotoğrafı Tam Ekran Gör"
       >
         <Image
-          source={{ uri: photoPath(ixId, assetId, shot.file_index) }}
+          source={{ uri: withCacheBust(photoPath(ixId, assetId, shot.file_index), shot.captured_at) }}
           style={styles.peekRowThumb}
           resizeMode="cover"
         />

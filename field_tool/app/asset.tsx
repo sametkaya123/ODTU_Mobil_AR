@@ -353,7 +353,7 @@ export default function AssetScreen() {
         await Promise.all(
           shots.map((s) => deletePhoto(a.intersection_id, a.asset_id, s.file_index)),
         );
-        await storage.removeAsset(a.asset_id);
+        await storage.removeAsset(a);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
         await load();
       });
