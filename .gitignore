@@ -29,3 +29,6 @@ build/
 .claude/
 
 # Field_tool specifics (managed Expo workflow — node_modules / android / ios excluded by sub-gitignore)
+
+# Videos (too large for repo)
+document/video/
