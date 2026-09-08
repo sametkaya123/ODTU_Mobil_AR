@@ -356,6 +356,23 @@ export default function AyarlarScreen() {
             </Text>
           </Card>
 
+          {/* Developer tools. */}
+          <Card>
+            <View style={styles.sectionHead}>
+              <IconSymbol name="science" size={20} color={t.primary} />
+              <Text style={styles.sectionTitle}>Geliştirici</Text>
+            </View>
+            <Pressable
+              style={({ pressed }) => [styles.devRow, pressed && { opacity: 0.7 }]}
+              onPress={() => router.push('/model-test')}
+              accessibilityRole="button"
+            >
+              <IconSymbol name="model_training" size={18} color={t.text} />
+              <Text style={styles.devRowLabel}>Model Testi (YOLO)</Text>
+              <IconSymbol name="chevron_right" size={18} color={t.textMuted} />
+            </Pressable>
+          </Card>
+
           {/* Action buttons. */}
           <Pressable
             style={({ pressed }) => [styles.btn, styles.btnPrimary, pressed && styles.btnPressed]}
@@ -521,6 +538,14 @@ function makeStyles(t: ReturnType<typeof useTheme>) {
       fontWeight: '700',
       fontSize: t.type.btn,
     },
+
+    devRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 10,
+    },
+    devRowLabel: { flex: 1, fontSize: t.type.bodyMd, color: t.text, fontWeight: '600' },
 
     footer: {
       flexDirection: 'row',

@@ -43,7 +43,8 @@
     },
     "plugins": [
       "expo-camera",
-      "expo-location"
+      "expo-location",
+      "onnxruntime-react-native"
     ],
     "experiments": {
       "typedRoutes": true
