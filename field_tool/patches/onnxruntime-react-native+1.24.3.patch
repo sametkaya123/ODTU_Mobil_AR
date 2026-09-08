@@ -1,9 +1,35 @@
 diff --git a/node_modules/onnxruntime-react-native/android/build.gradle b/node_modules/onnxruntime-react-native/android/build.gradle
 --- a/node_modules/onnxruntime-react-native/android/build.gradle
 +++ b/node_modules/onnxruntime-react-native/android/build.gradle
-@@ -1,4 +1,5 @@
- import java.nio.file.Paths
-+import org.gradle.util.VersionNumber
+@@ -22,6 +22,22 @@
+   return rootProject.ext.has(name) ? rootProject.ext.get(name) : (project.properties['OnnxruntimeModule_' + name]).toInteger()
+ }
  
- buildscript {
-   repositories {
++// Gradle 9 removed org.gradle.util.VersionNumber (and it was never imported
++// here to begin with, relying on an implicit import older Gradle provided) -
++// plain string comparison instead of depending on any Gradle-internal API.
++def isVersionAtLeast(String version, String minVersion) {
++  def toParts = { String v -> v.split(/[-+]/)[0].tokenize('.').collect { it.isInteger() ? it.toInteger() : 0 } }
++  def vParts = toParts(version)
++  def mParts = toParts(minVersion)
++  def n = Math.max(vParts.size(), mParts.size())
++  for (int i = 0; i < n; i++) {
++    int a = i < vParts.size() ? vParts[i] : 0
++    int b = i < mParts.size() ? mParts[i] : 0
++    if (a != b) return a > b
++  }
++  return true
++}
++
+ def reactNativeArchitectures() {
+   def value = project.getProperties().get("reactNativeArchitectures")
+   return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
+@@ -247,7 +263,7 @@
+     extractLibs "com.microsoft.onnxruntime:onnxruntime-android:latest.integration@aar"
+   }
+ 
+-  if (VersionNumber.parse(REACT_NATIVE_VERSION) < VersionNumber.parse("0.71")) {
++  if (!isVersionAtLeast(REACT_NATIVE_VERSION, "0.71")) {
+     extractLibs "com.facebook.fbjni:fbjni:+:headers"
+     extractLibs "com.facebook.fbjni:fbjni:+"
+   }
