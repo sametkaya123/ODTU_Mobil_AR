@@ -24,6 +24,7 @@ function subtitleFor(pathname: string | null | undefined): string {
   if (pathname.startsWith('/onboarding')) return 'Hoş Geldin';
   if (pathname.startsWith('/asset-yeni')) return 'Yeni Asset';
   if (pathname.startsWith('/kavsak-yeni')) return 'Yeni Kavşak';
+  if (pathname.startsWith('/model-test')) return 'Model Testi';
   if (pathname.startsWith('/cekim')) return 'Çekim';
   if (pathname.startsWith('/kavsak')) return 'Kavşak';
   if (pathname.startsWith('/asset')) return 'Asset';
@@ -74,6 +75,7 @@ function StackShell() {
         <Stack.Screen name="kavsak" />
         <Stack.Screen name="asset" />
         <Stack.Screen name="cekim" />
+        <Stack.Screen name="model-test" />
         <Stack.Screen name="disa_aktar" />
         <Stack.Screen name="ayarlar" />
         <Stack.Screen name="harita" />

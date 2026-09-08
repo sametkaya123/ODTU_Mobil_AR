@@ -1,0 +1,50 @@
+# .easignore — controls what EAS Build uploads. When this file exists, EAS
+# CLI ignores ALL .gitignore files entirely (its own documented behavior), so
+# this mirrors the repo's .gitignore + field_tool/.gitignore rules by hand,
+# with ONE deliberate exception: field_tool/assets/models/*.onnx must be
+# uploaded (the YOLO model — gitignored to keep it out of git history, but
+# still needed on EAS's build server to bundle and build the app).
+#
+# field_tool/app/onboarding.tsx is likewise deliberately NOT excluded here
+# even though .gitignore excludes it from git — app/index.tsx imports it
+# directly, so the remote Metro bundle needs the file to exist.
+
+.git
+node_modules/
+.expo/
+dist/
+build/
+web-build/
+*.log
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+*.tsbuildinfo
+.idea/
+.vscode/
+.fleet/
+.fleet.json
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+ehthumbs_vista.db
+.claude/
+document/video/
+
+# Expo prebuild native projects — managed workflow, build fresh on EAS.
+field_tool/android/
+field_tool/ios/
+*.apk
+*.aab
+*.ipa
+.gradle/
+
+# Draft screens (kept locally for reference; not part of the app). Only
+# these two — onboarding.tsx is intentionally left uploadable, see above.
+field_tool/app/*-yeni.tsx
+field_tool/app/*-utility*.tsx

@@ -64,3 +64,6 @@ screenshots/
 app/*-yeni.tsx
 app/*-utility*.tsx
 app/onboarding.tsx
+
+# YOLO model file — large binary, dropped in locally before building
+assets/models/*.onnx
