@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "web": "expo start --web",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -41,6 +42,7 @@
     "@types/react": "~19.2.0",
     "eas-cli": "^23.2.0",
     "hermes-compiler": "^250829098.0.17",
+    "patch-package": "^8.0.1",
     "typescript": "~5.9.0"
   },
   "private": true
