@@ -1,7 +1,31 @@
 diff --git a/node_modules/onnxruntime-react-native/android/build.gradle b/node_modules/onnxruntime-react-native/android/build.gradle
 --- a/node_modules/onnxruntime-react-native/android/build.gradle
 +++ b/node_modules/onnxruntime-react-native/android/build.gradle
-@@ -22,6 +22,22 @@
+@@ -1,16 +1,12 @@
+ import java.nio.file.Paths
+ 
+-buildscript {
+-  repositories {
+-    google()
+-    mavenCentral()
+-  }
+-
+-  dependencies {
+-    classpath 'com.android.tools.build:gradle:7.4.2'
+-    // noinspection DifferentKotlinGradleVersion
+-  }
+-}
++// No module-local buildscript{} block: pinning an old AGP classpath here
++// (this used to declare com.android.tools.build:gradle:7.4.2) collides with
++// the root project's own (much newer) AGP and breaks Android Library
++// component publishing elsewhere (":expo" project configuration failing
++// with "SoftwareComponent with name 'release' not found"). Every other
++// autolinked native module in this project inherits AGP from the root
++// instead of declaring its own - do the same here.
+ 
+ apply plugin: 'com.android.library'
+ 
+@@ -22,6 +18,22 @@
    return rootProject.ext.has(name) ? rootProject.ext.get(name) : (project.properties['OnnxruntimeModule_' + name]).toInteger()
  }
  
@@ -24,7 +48,7 @@ diff --git a/node_modules/onnxruntime-react-native/android/build.gradle b/node_m
  def reactNativeArchitectures() {
    def value = project.getProperties().get("reactNativeArchitectures")
    return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
-@@ -247,7 +263,7 @@
+@@ -247,7 +259,7 @@
      extractLibs "com.microsoft.onnxruntime:onnxruntime-android:latest.integration@aar"
    }
  
